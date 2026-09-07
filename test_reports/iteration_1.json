@@ -1,0 +1,41 @@
+{
+  "summary": "Wrote pytest regression suite (/app/backend/tests/test_wheelind_backend.py) for Wheelind backend covering auth (admin + OTP), RBAC, driver onboarding (KYC+vehicle), presence prerequisites, fare estimate + min-fare floor, versioned fare configs, full ride lifecycle happy path with financials, state-machine enforcement (start-before-arrived, complete-before-in-progress, arrived-twice, wrong OTP), rider fare increase and status guard, zero-commission subscription earnings, disputes+refund wallet credit, SOS create+list, promotions create+single redeem, and admin dashboard counts. All 22 tests PASS against the public REACT_APP_BACKEND_URL. Financial arithmetic verified: sedan 5km/15min => 189 total; commission 20% => 37.8, net 151.2, cashback 3.78; zero_commission plan => commission 0 and net==gross.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/rides/{ride_id}", "issue": "Non-participant riders/drivers/admins: rider path returns 403 only if user is rider AND not owner; a driver who is not the assigned driver still receives the full ride doc (minus OTP). Consider stricter authorization to hide details from unrelated drivers."},
+      {"endpoint": "POST /api/rides/{id}/complete", "issue": "For payment_method='cash' the driver still receives commission_amount as a debit txn on their wallet even though rider did not pay via wallet. Verify intended commission-cash flow; can drive driver wallet negative (allow_negative=True). Not a test failure, but worth documenting."},
+      {"endpoint": "POST /api/promotions/{code}/redeem", "issue": "budget check uses '>' rather than '>=' so a promo can be redeemed exactly to the budget cap; acceptable but worth documenting."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_wheelind_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Consider stricter RBAC on GET /api/rides/{ride_id} for non-participant drivers (currently returns full ride doc minus OTP).",
+    "Confirm commission ledger behaviour for cash rides (currently posts debit even if rider paid cash, which can push driver wallet negative)."
+  ],
+  "critical_code_review_comments": [
+    "Fare/ride math is deterministic and matches published fare formula; good.",
+    "presence router enforces KYC-approved AND active-approved vehicle before online; correct.",
+    "Fare config versioning: create endpoint properly deactivates prior active version and increments version; verified.",
+    "Ride state machine enforced via _driver_and_ride expected_status; verified out-of-order returns 400.",
+    "post_transaction consistently updates wallet.balance and inserts transaction with balance_after; ledger integrity looks OK.",
+    "dispatch does not exclude drivers whose presence.status is 'on_trip' explicitly, but matching_service filters 'status: online' so on_trip drivers are naturally excluded; watch for regressions if status names change.",
+    "generate_trip_otp is exposed to rider via GET /api/rides/{id}; endpoint correctly hides OTP from non-assigned drivers.",
+    "compute_earning multiplies by effective_pct only; zero_commission gives net==gross as expected."
+  ],
+  "updated_files": [
+    "/app/backend/tests/__init__.py (new)",
+    "/app/backend/tests/test_wheelind_backend.py (new)"
+  ],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "N/A"},
+  "test_credentials": "Admin admin@wheelind.com/admin123; rider/driver via /api/auth/otp/request+verify (debug_code returned because OTP_DEBUG=true). Tests generate unique phones per run.",
+  "seed_data_creation": "Tests create TEST_ prefixed users/promotions and a TESTCITY_<run> fare config. No cleanup performed; data persists in wheelind_db (acceptable for shared preview backend).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Suite lives at /app/backend/tests/test_wheelind_backend.py and uses pytest-xdist loadscope (configured in /app/backend/pytest.ini). It relies on REACT_APP_BACKEND_URL from /app/frontend/.env (loaded via python-dotenv). Uses unique run-id-derived phone numbers and vehicle plates to avoid collisions on reruns. Happy-ride and zero-commission flows use dedicated drivers to isolate from other tests; zero-commission uses non-Bangalore coordinates to prevent geographic collision with other online test drivers. If more scenarios are added, keep drivers on distinct coordinates or run offline+online cleanly.",
+  "rca of the issue": "Initial run had 2 failures: happy_ride and zero_commission fixtures polled offers on the wrong driver because /api/rides/_dispatch matched ANY nearest online driver — parallel tests left multiple online drivers within the 5km radius at the same Bangalore pickup, so offers went to a different driver than the test polled. Fixed by (a) using a dedicated fully-onboarded driver in the happy_ride fixture, (b) placing the zero-commission driver+ride at far-away coordinates so only that driver is a candidate, and (c) polling /driver/offers with short retry backoff to smooth out timing."
+}
