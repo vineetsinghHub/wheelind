@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Image } from "react-native";
 import { theme } from "../theme";
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
@@ -44,9 +44,12 @@ export default function HomeScreen({ navigation }) {
   return (
     <ScrollView style={s.container} contentContainerStyle={{ padding: 20, paddingTop: 60 }}>
       <View style={s.topRow}>
-        <View>
-          <Text style={s.hi}>Hi{user?.name ? `, ${user.name}` : ""} 👋</Text>
-          <Text style={s.muted}>Where to?</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Image source={require("../../assets/emblem.png")} style={s.emblemSm} />
+          <View>
+            <Text style={s.hi}>Hi{user?.name ? `, ${user.name}` : ""}</Text>
+            <Text style={s.muted}>Where to?</Text>
+          </View>
         </View>
         <TouchableOpacity style={s.walletChip} onPress={loadWallet}>
           <Text style={s.walletLabel}>Wallet</Text>
@@ -97,7 +100,7 @@ export default function HomeScreen({ navigation }) {
 
       {!!err && <Text style={s.err}>{err}</Text>}
       <TouchableOpacity style={s.btn} onPress={book} disabled={loading} testID="book-ride-btn">
-        {loading ? <ActivityIndicator color="#04120E" /> : <Text style={s.btnText}>Book ride</Text>}
+        {loading ? <ActivityIndicator color={theme.onAccent} /> : <Text style={s.btnText}>Book ride</Text>}
       </TouchableOpacity>
 
       <TouchableOpacity style={{ marginTop: 24 }} onPress={() => api.topup(500).then(loadWallet)}>
@@ -112,6 +115,7 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.bg },
   topRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
   hi: { color: theme.text, fontSize: 26, fontWeight: "800" },
+  emblemSm: { width: 42, height: 42, borderRadius: 21 },
   muted: { color: theme.muted, marginTop: 2 },
   walletChip: { backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: "flex-end" },
   walletLabel: { color: theme.muted, fontSize: 11 },
@@ -125,13 +129,13 @@ const s = StyleSheet.create({
   chip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surface },
   chipOn: { backgroundColor: theme.accent, borderColor: theme.accent },
   chipText: { color: theme.muted, fontWeight: "700" },
-  chipTextOn: { color: "#04120E" },
+  chipTextOn: { color: theme.onAccent },
   ghostBtn: { marginTop: 18, borderWidth: 1, borderColor: theme.accent, borderRadius: 12, padding: 14, alignItems: "center" },
   ghostText: { color: theme.accent, fontWeight: "700" },
   estimate: { marginTop: 12, backgroundColor: theme.surfaceAlt, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: theme.border },
   estTotal: { color: theme.text, fontSize: 24, fontWeight: "800" },
   btn: { backgroundColor: theme.accent, borderRadius: 14, padding: 18, alignItems: "center", marginTop: 18 },
-  btnText: { color: "#04120E", fontWeight: "800", fontSize: 17 },
+  btnText: { color: theme.onAccent, fontWeight: "800", fontSize: 17 },
   link: { color: theme.accent, textAlign: "center", fontWeight: "700" },
   logout: { color: theme.muted, textAlign: "center" },
   err: { color: theme.danger, marginTop: 12, textAlign: "center" },

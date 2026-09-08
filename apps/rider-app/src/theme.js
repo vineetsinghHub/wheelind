@@ -1,14 +1,15 @@
-// Wheelind "Kinetic" theme — motion-inspired dark palette (not the usual purple slop).
+// Wheelind brand — premium black + gold. "Your ride, our pride."
 export const theme = {
-  bg: "#0B0F0E",
-  surface: "#141B19",
-  surfaceAlt: "#1C2622",
-  border: "#26332E",
-  text: "#F2F5F3",
-  muted: "#8A9793",
-  accent: "#00E0A4", // electric mint
-  accentDim: "#0B7A5E",
+  bg: "#0A0A0A",
+  surface: "#151412",
+  surfaceAlt: "#1E1B16",
+  border: "#2A2620",
+  text: "#F6F3EC",
+  muted: "#9A948A",
+  accent: "#F2B01E", // Wheelind gold
+  accentDim: "#8A6410",
   danger: "#FF5A5F",
   warn: "#FFC24B",
+  onAccent: "#0B0B0B", // text/icon color on gold surfaces
   radius: 16,
 };

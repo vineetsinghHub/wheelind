@@ -5,8 +5,9 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#0B0F0E",
-    "splash": { "backgroundColor": "#0B0F0E", "resizeMode": "contain" },
+    "icon": "./assets/emblem.png",
+    "backgroundColor": "#0A0A0A",
+    "splash": { "image": "./assets/emblem.png", "backgroundColor": "#0A0A0A", "resizeMode": "contain" },
     "assetBundlePatterns": ["**/*"],
     "ios": { "supportsTablet": true },
     "android": { "package": "com.wheelind.rider" }

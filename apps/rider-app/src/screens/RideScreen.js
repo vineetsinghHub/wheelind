@@ -104,6 +104,6 @@ const s = StyleSheet.create({
   cancelBtn: { borderWidth: 1, borderColor: theme.danger, borderRadius: 12, padding: 16, alignItems: "center" },
   cancelText: { color: theme.danger, fontWeight: "700" },
   btn: { backgroundColor: theme.accent, borderRadius: 14, padding: 18, alignItems: "center" },
-  btnText: { color: "#04120E", fontWeight: "800", fontSize: 16 },
+  btnText: { color: theme.onAccent, fontWeight: "800", fontSize: 16 },
   err: { color: theme.danger, marginBottom: 12, textAlign: "center" },
 });
