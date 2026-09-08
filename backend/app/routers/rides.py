@@ -1,19 +1,20 @@
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.database import db
 from app.core.deps import get_current_user, require_roles
-from app.core.config import settings
 from app.core.audit import audit_log
 from app.core.security import generate_trip_otp
-from app.models.enums import VehicleType, PaymentMethod, RideStatus
+from app.core.ws import manager
+from app.core.redis_client import set_driver_status, get_trip_path, clear_trip_path
+from app.models.enums import VehicleType, PaymentMethod
 from app.services.fare_service import get_active_config, compute_breakup, compute_earning
-from app.services.matching_service import find_nearby_drivers
 from app.services.wallet_service import post_transaction, record_driver_earning
-from app.integrations.stubs import maps, push
+from app.services.dispatch_service import dispatch
+from app.integrations.stubs import maps
 
 router = APIRouter(prefix="/api", tags=["rides"])
 
@@ -63,57 +64,16 @@ class CompleteTrip(BaseModel):
     duration_min: float | None = None
 
 
-# ----------------- dispatch helpers -----------------
-async def _create_offer(ride: dict, driver: dict) -> dict:
-    offer = {
-        "id": str(uuid.uuid4()),
-        "ride_id": ride["id"],
-        "driver_id": driver["driver_id"],
-        "driver_user_id": driver["user_id"],
-        "vehicle_type": ride["vehicle_type"],
-        "fare_estimate": ride["fare_estimate"]["total"],
-        "pickup": ride["pickup"],
-        "status": "pending",
-        "expires_at": datetime.now(timezone.utc) + timedelta(seconds=settings.OFFER_TTL_SECONDS),
-        "created_at": _now(),
-    }
-    await db.offers.insert_one(dict(offer))
-    await push.notify(driver["user_id"], "New ride request", f"Fare ~{offer['fare_estimate']}")
-    offer.pop("_id", None)
-    return offer
+def _to_dt(v):
+    dt = datetime.fromisoformat(v) if isinstance(v, str) else v
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-async def _dispatch(ride_id: str) -> dict:
-    ride = await db.rides.find_one({"id": ride_id}, {"_id": 0})
-    if not ride or ride["status"] not in ("searching", "no_drivers"):
-        return ride
-    attempt = ride.get("dispatch_attempt", 0) + 1
-    if attempt > settings.MAX_DISPATCH_ATTEMPTS:
-        await db.rides.update_one({"id": ride_id}, {"$set": {"status": "no_drivers", "updated_at": _now()}})
-        return await db.rides.find_one({"id": ride_id}, {"_id": 0})
-
-    # expire outstanding pending offers
-    await db.offers.update_many({"ride_id": ride_id, "status": "pending"}, {"$set": {"status": "expired"}})
-
-    offered = set(ride.get("offered_drivers", []))
-    coords = ride["pickup"]
-    candidates = await find_nearby_drivers(coords["lng"], coords["lat"], ride["vehicle_type"], limit=20)
-    next_driver = next((c for c in candidates if c["driver_id"] not in offered), None)
-
-    if not next_driver:
-        # no candidate this round; keep searching state, bump attempt
-        await db.rides.update_one(
-            {"id": ride_id}, {"$set": {"status": "searching", "dispatch_attempt": attempt, "updated_at": _now()}}
-        )
-        return await db.rides.find_one({"id": ride_id}, {"_id": 0})
-
-    offer = await _create_offer(ride, next_driver)
-    offered.add(next_driver["driver_id"])
-    await db.rides.update_one(
-        {"id": ride_id},
-        {"$set": {"status": "searching", "dispatch_attempt": attempt, "offered_drivers": list(offered), "current_offer_id": offer["id"], "updated_at": _now()}},
-    )
-    return await db.rides.find_one({"id": ride_id}, {"_id": 0})
+async def _notify_rider(rider_id, status, ride_id, extra=None):
+    msg = {"type": "ride_update", "ride_id": ride_id, "status": status}
+    if extra:
+        msg.update(extra)
+    await manager.send_to_user(rider_id, msg)
 
 
 # ----------------- rider: create & manage ride -----------------
@@ -142,6 +102,7 @@ async def create_ride(body: RideCreate, user: dict = Depends(require_roles("ride
         "rider_added": 0.0,
         "fare_estimate": breakup,
         "fare_final": None,
+        "path": [],
         "trip_otp": generate_trip_otp(),
         "status": "searching",
         "dispatch_attempt": 0,
@@ -153,7 +114,7 @@ async def create_ride(body: RideCreate, user: dict = Depends(require_roles("ride
     }
     await db.rides.insert_one(dict(ride))
     await audit_log("ride.create", user["id"], "rider", "ride", ride_id, {"vehicle_type": body.vehicle_type})
-    await _dispatch(ride_id)
+    await dispatch(ride_id)
     return await db.rides.find_one({"id": ride_id}, {"_id": 0})
 
 
@@ -174,7 +135,6 @@ async def get_ride(ride_id: str, user: dict = Depends(get_current_user)):
     ride = await db.rides.find_one({"id": ride_id}, {"_id": 0})
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
-    # Only ride participants (or admin) may view the ride
     if user["role"] == "driver":
         d = await db.drivers.find_one({"user_id": user["id"]}, {"_id": 0})
         if not d or ride.get("driver_id") != d["id"]:
@@ -198,8 +158,7 @@ async def increase_fare(ride_id: str, body: IncreaseFare, user: dict = Depends(r
         {"id": ride_id}, {"$set": {"rider_added": rider_added, "fare_estimate": breakup, "status": "searching", "updated_at": _now()}}
     )
     await audit_log("ride.increase_fare", user["id"], "rider", "ride", ride_id, {"added": body.amount})
-    updated = await _dispatch(ride_id)
-    return updated
+    return await dispatch(ride_id)
 
 
 @router.post("/rides/{ride_id}/dispatch-next")
@@ -209,7 +168,7 @@ async def dispatch_next(ride_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Ride not found")
     if user["role"] == "rider" and ride["rider_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Not your ride")
-    return await _dispatch(ride_id)
+    return await dispatch(ride_id)
 
 
 @router.post("/rides/{ride_id}/cancel")
@@ -226,6 +185,10 @@ async def cancel_ride(ride_id: str, user: dict = Depends(get_current_user)):
     )
     if ride.get("driver_id"):
         await db.driver_presence.update_one({"driver_id": ride["driver_id"]}, {"$set": {"status": "online"}})
+        await set_driver_status(ride["driver_id"], "online")
+        if ride.get("driver_user_id"):
+            await manager.send_to_user(ride["driver_user_id"], {"type": "ride_update", "ride_id": ride_id, "status": "cancelled"})
+    await _notify_rider(ride["rider_id"], "cancelled", ride_id)
     await audit_log("ride.cancel", user["id"], user["role"], "ride", ride_id)
     return {"message": "Ride cancelled"}
 
@@ -238,16 +201,7 @@ async def my_offers(user: dict = Depends(require_roles("driver"))):
         raise HTTPException(status_code=404, detail="Driver profile not found")
     now = datetime.now(timezone.utc)
     offers = await db.offers.find({"driver_id": d["id"], "status": "pending"}, {"_id": 0}).to_list(20)
-    valid = [o for o in offers if _to_dt(o["expires_at"]) > now]
-    return valid
-
-
-def _to_dt(v):
-    if isinstance(v, str):
-        dt = datetime.fromisoformat(v)
-    else:
-        dt = v
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return [o for o in offers if _to_dt(o["expires_at"]) > now]
 
 
 @router.post("/offers/{offer_id}/accept")
@@ -271,6 +225,9 @@ async def accept_offer(offer_id: str, user: dict = Depends(require_roles("driver
         {"$set": {"driver_id": d["id"], "driver_user_id": user["id"], "status": "driver_assigned", "updated_at": _now()}, "$push": {"status_history": {"status": "driver_assigned", "at": _now()}}},
     )
     await db.driver_presence.update_one({"driver_id": d["id"]}, {"$set": {"status": "on_trip"}})
+    await set_driver_status(d["id"], "on_trip")
+    driver_info = {"driver_name": d.get("name"), "rating": d.get("rating"), "driver_id": d["id"]}
+    await _notify_rider(ride["rider_id"], "driver_assigned", ride["id"], driver_info)
     await audit_log("ride.assigned", user["id"], "driver", "ride", ride["id"])
     return await db.rides.find_one({"id": ride["id"]}, {"_id": 0})
 
@@ -282,7 +239,7 @@ async def reject_offer(offer_id: str, user: dict = Depends(require_roles("driver
     if not offer or (d and offer["driver_id"] != d["id"]):
         raise HTTPException(status_code=404, detail="Offer not found")
     await db.offers.update_one({"id": offer_id}, {"$set": {"status": "rejected"}})
-    await _dispatch(offer["ride_id"])
+    await dispatch(offer["ride_id"])
     return {"message": "Offer rejected"}
 
 
@@ -303,6 +260,7 @@ async def arrived(ride_id: str, user: dict = Depends(require_roles("driver"))):
     await db.rides.update_one(
         {"id": ride_id}, {"$set": {"status": "arrived", "arrived_at": _now(), "updated_at": _now()}, "$push": {"status_history": {"status": "arrived", "at": _now()}}}
     )
+    await _notify_rider(ride["rider_id"], "arrived", ride_id)
     return {"message": "Marked as arrived"}
 
 
@@ -315,6 +273,7 @@ async def start_trip(ride_id: str, body: StartTrip, user: dict = Depends(require
         {"id": ride_id},
         {"$set": {"status": "in_progress", "started_at": _now(), "updated_at": _now()}, "$push": {"status_history": {"status": "trip_started", "at": _now()}}},
     )
+    await _notify_rider(ride["rider_id"], "in_progress", ride_id)
     await audit_log("ride.start", user["id"], "driver", "ride", ride_id)
     return {"message": "Trip started"}
 
@@ -328,7 +287,6 @@ async def complete_trip(ride_id: str, body: CompleteTrip, user: dict = Depends(r
     breakup = compute_breakup(ride["fare_config_snapshot"], distance_km, duration_min, rider_added=ride.get("rider_added", 0.0))
     total = breakup["total"]
 
-    # Commission vs subscription (computed regardless of payment mode; recorded in earnings ledger)
     sub = await db.driver_subscriptions.find_one({"driver_id": d["id"], "active": True}, {"_id": 0})
     zero_commission = bool(sub and sub.get("plan") == "zero_commission")
     commission_pct = float(ride["fare_config_snapshot"].get("commission_percent", 0))
@@ -337,25 +295,28 @@ async def complete_trip(ride_id: str, body: CompleteTrip, user: dict = Depends(r
 
     cashback = 0.0
     if ride["payment_method"] == "wallet":
-        # Rider pays platform digitally; platform owes driver the net earning.
         await post_transaction(ride["rider_id"], total, "debit", "ride_payment", "ride", ride_id, "Ride payment")
         await post_transaction(user["id"], earning["net_earning"], "credit", "driver_earning", "ride", ride_id, "Trip earning")
-        # Loyalty cashback: 2% up to 20
         cashback = round(min(total * 0.02, 20.0), 2)
         if cashback > 0:
             await post_transaction(ride["rider_id"], cashback, "credit", "cashback", "ride", ride_id, "Ride cashback")
     else:
-        # Cash: driver collected full fare in hand and owes the platform its commission.
         if earning["commission_amount"] > 0:
             await post_transaction(user["id"], earning["commission_amount"], "debit", "commission", "ride", ride_id, "Platform commission (cash ride)", allow_negative=True)
 
+    # Persist live trip path from Redis hot layer to MongoDB, then clear hot state
+    path = await get_trip_path(ride_id)
+    await clear_trip_path(ride_id)
+
     await db.rides.update_one(
         {"id": ride_id},
-        {"$set": {"status": "completed", "fare_final": breakup, "earning": earning, "cashback": cashback, "completed_at": _now(), "updated_at": _now()}, "$push": {"status_history": {"status": "completed", "at": _now()}}},
+        {"$set": {"status": "completed", "fare_final": breakup, "earning": earning, "cashback": cashback, "path": path, "completed_at": _now(), "updated_at": _now()}, "$push": {"status_history": {"status": "completed", "at": _now()}}},
     )
     await db.driver_presence.update_one({"driver_id": d["id"]}, {"$set": {"status": "online"}})
+    await set_driver_status(d["id"], "online")
     await db.drivers.update_one({"id": d["id"]}, {"$inc": {"total_trips": 1}})
     await db.riders.update_one({"user_id": ride["rider_id"]}, {"$inc": {"total_trips": 1}})
+    await _notify_rider(ride["rider_id"], "completed", ride_id, {"fare_final": breakup})
     await audit_log("ride.complete", user["id"], "driver", "ride", ride_id, {"total": total, "net": earning["net_earning"]})
 
-    return {"message": "Trip completed", "fare_final": breakup, "earning": earning, "cashback": cashback}
+    return {"message": "Trip completed", "fare_final": breakup, "earning": earning, "cashback": cashback, "path_points": len(path)}

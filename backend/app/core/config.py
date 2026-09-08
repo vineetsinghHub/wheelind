@@ -31,5 +31,9 @@ class Settings:
 
     CORS_ORIGINS: str = os.environ.get("CORS_ORIGINS", "*")
 
+    # Redis (hot real-time layer)
+    REDIS_URL: str = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    WORKER_POLL_SECONDS: int = int(os.environ.get("WORKER_POLL_SECONDS", "3"))
+
 
 settings = Settings()

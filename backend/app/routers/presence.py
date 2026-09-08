@@ -6,6 +6,8 @@ from pydantic import BaseModel, field_validator
 from app.core.database import db
 from app.core.deps import require_roles
 from app.core.config import settings
+from app.core.redis_client import update_driver_location, remove_driver
+from app.core.ws import manager
 from app.models.enums import VehicleType
 
 router = APIRouter(prefix="/api/presence", tags=["presence"])
@@ -62,6 +64,7 @@ async def go_online(body: GoOnline, user: dict = Depends(require_roles("driver")
         "expire_at": expire_at,
     }
     await db.driver_presence.update_one({"driver_id": driver["id"]}, {"$set": doc}, upsert=True)
+    await update_driver_location(driver["id"], user["id"], body.vehicle_type, body.lng, body.lat, "online", settings.HEARTBEAT_TTL_SECONDS)
     return {"status": "online", "expire_in": settings.HEARTBEAT_TTL_SECONDS}
 
 
@@ -76,6 +79,7 @@ async def heartbeat(body: Heartbeat, user: dict = Depends(require_roles("driver"
         {"driver_id": driver["id"]},
         {"$set": {"location": {"type": "Point", "coordinates": [body.lng, body.lat]}, "last_heartbeat": _now_iso(), "expire_at": expire_at}},
     )
+    await update_driver_location(driver["id"], user["id"], presence["vehicle_type"], body.lng, body.lat, presence.get("status", "online"), settings.HEARTBEAT_TTL_SECONDS)
     return {"status": presence["status"], "expire_in": settings.HEARTBEAT_TTL_SECONDS}
 
 
@@ -83,6 +87,7 @@ async def heartbeat(body: Heartbeat, user: dict = Depends(require_roles("driver"
 async def go_offline(user: dict = Depends(require_roles("driver"))):
     driver = await _driver(user)
     await db.driver_presence.delete_one({"driver_id": driver["id"]})
+    await remove_driver(driver["id"])
     return {"status": "offline"}
 
 

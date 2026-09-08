@@ -12,6 +12,8 @@ from app.core.database import db
 from app.core.errors import register_exception_handlers
 from app.core.indexes import ensure_indexes
 from app.core.security import hash_password, verify_password
+from app.core.worker import start_worker, stop_worker
+from app.core.redis_client import redis_available, close_redis
 from app.routers import (
     admin,
     auth,
@@ -25,6 +27,7 @@ from app.routers import (
     safety,
     vehicles,
     wallet,
+    ws,
 )
 import uuid
 from datetime import datetime, timezone
@@ -36,7 +39,7 @@ app = FastAPI(title="Wheelind API", version="0.1.0")
 
 register_exception_handlers(app)
 
-for r in [auth, riders, drivers, vehicles, documents, admin, presence, rides, fare, wallet, safety, promotions]:
+for r in [auth, riders, drivers, vehicles, documents, admin, presence, rides, fare, wallet, safety, promotions, ws]:
     app.include_router(r.router)
 
 
@@ -98,6 +101,9 @@ async def on_startup():
     await ensure_indexes()
     await seed_admin()
     await seed_fare_configs()
+    redis_ok = await redis_available()
+    logger.info("Redis hot layer: %s", "connected" if redis_ok else "UNAVAILABLE (falling back to Mongo geo)")
+    start_worker()
     logger.info("Wheelind API started")
 
 
@@ -112,4 +118,5 @@ app.add_middleware(
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    pass
+    stop_worker()
+    await close_redis()

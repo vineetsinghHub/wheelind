@@ -31,12 +31,25 @@ Ride-hailing platform (riders + drivers + admin). Backend-first. Original plan s
 
 ## Testing
 - 22/22 backend regression tests pass (`/app/backend/tests/test_wheelind_backend.py`)
-- Fixed post-review: wallet-ride ledger double-count (driver now nets correctly); stricter ride-view RBAC for non-participant drivers
+- Realtime verified via script: WS offer push, ride-status relay, live driver-location relay, trip-path Redis→Mongo persistence, Redis GEO matching, and worker auto-timeout (dispatch advanced with no manual trigger)
+
+## Realtime layer (added 2026-06)
+- **Redis** (`redis-server` under supervisor, `app/core/redis_client.py`): hot driver-location layer — GEO set per vehicle type + per-driver heartbeat TTL key; matching reads Redis first (`$near`/GEOSEARCH), falls back to Mongo 2dsphere if Redis down. Live trip path buffered in Redis during the ride, written to Mongo `ride.path` on completion then cleared.
+- **WebSocket** (`/api/ws?token=`, `app/core/ws.py` + `app/routers/ws.py`): instant offer push to drivers, ride-status updates to riders, and driver→rider live location relay (no polling needed).
+- **Background worker** (`app/core/worker.py`): asyncio loop (poll 3s) auto-expires stale offers and re-dispatches searching rides; ends at `no_drivers` after max attempts — never loops endlessly.
+
+## Mobile apps (React Native / Expo, added 2026-06)
+- Monorepo `apps/rider-app` and `apps/driver-app` (Expo SDK 51, React Navigation, AsyncStorage). Run with `yarn start` in each (device/simulator; NOT the web preview).
+- Rider: phone-OTP auth, book ride (pickup/drop/vehicle/pay), live status + trip OTP + driver live location over WebSocket, fare boost, cancel, wallet top-up.
+- Driver: phone-OTP auth, KYC/vehicle onboarding, online/offline toggle with heartbeat, instant offer cards (WS), accept/skip, arrived → OTP start → complete, earnings + zero-commission subscription.
+- **Brand:** user said design details were shared but none were attached to this run; apps ship with a self-designed "Kinetic" dark+mint theme pending the real brand assets.
+- Backend base URL configured in each app's `src/config.js`.
+
 
 ## Backlog / Next
-- P1: Real integrations (maps, SMS/OTP, payment gateway, masked calling, push, object storage) — decisions still pending
-- P1: WebSocket/live location + real-time offer push (currently REST poll)
-- P2: Background scheduler for offer-timeout auto-advance (currently rider/driver/system-triggered)
-- P2: Rider app, Driver app, Admin portal frontends
-- P2: Fraud detection hooks, route/speed anomaly checks
-- P2: Ratings after trip, scheduled/rental rides, multi-city zones
+- P1: Real integrations (maps, SMS/OTP, payment gateway, masked calling, push, object storage) — **still stubbed**, awaiting provider choices
+- P1: Admin portal frontend (web)
+- P2: Device GPS + real map component (react-native-maps) in both apps once maps provider chosen
+- P2: Re-theme apps with the real brand assets once re-shared
+- P2: Fraud detection hooks, route/speed anomaly checks, ratings after trip, scheduled/rental rides, multi-city zones
+- P2: Persist Redis supervisor config into image / infra-as-code (currently `/etc/supervisor/conf.d/redis.conf`)
