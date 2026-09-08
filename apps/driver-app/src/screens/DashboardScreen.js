@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Image } from "react-native";
 import { theme } from "../theme";
 import { api, openSocket, sendLocation } from "../api";
 import { useAuth } from "../context/AuthContext";
@@ -112,16 +112,19 @@ export default function DashboardScreen() {
   return (
     <ScrollView style={s.container} contentContainerStyle={{ padding: 20, paddingTop: 60 }}>
       <View style={s.header}>
-        <View>
-          <Text style={s.name}>{profile.name || "Driver"}</Text>
-          <Text style={s.muted}>★ {profile.rating} · {profile.total_trips} trips</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <Image source={require("../../assets/emblem.png")} style={s.emblemSm} />
+          <View>
+            <Text style={s.name}>{profile.name || "Driver"}</Text>
+            <Text style={s.muted}>★ {profile.rating} · {profile.total_trips} trips</Text>
+          </View>
         </View>
         <View style={[s.statusDot, { backgroundColor: online ? theme.accent : theme.muted }]} />
       </View>
 
       {/* Online toggle */}
       <TouchableOpacity style={[s.bigToggle, online ? s.onlineBg : s.offlineBg]} onPress={online ? doOffline : doOnline} disabled={busy} testID="online-toggle">
-        {busy ? <ActivityIndicator color="#04120E" /> : <Text style={[s.toggleText, online && { color: "#04120E" }]}>{online ? "YOU'RE ONLINE — tap to go offline" : "GO ONLINE"}</Text>}
+        {busy ? <ActivityIndicator color={theme.onAccent} /> : <Text style={[s.toggleText, online && { color: theme.onAccent }]}>{online ? "YOU'RE ONLINE — tap to go offline" : "GO ONLINE"}</Text>}
       </TouchableOpacity>
 
       {/* Onboarding */}
@@ -216,6 +219,7 @@ const s = StyleSheet.create({
   center: { flex: 1, backgroundColor: theme.bg, alignItems: "center", justifyContent: "center" },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 18 },
   name: { color: theme.text, fontSize: 26, fontWeight: "800" },
+  emblemSm: { width: 44, height: 44, borderRadius: 22 },
   muted: { color: theme.muted, marginTop: 4 },
   statusDot: { width: 16, height: 16, borderRadius: 999 },
   bigToggle: { borderRadius: theme.radius, padding: 22, alignItems: "center", marginBottom: 18 },
@@ -230,7 +234,7 @@ const s = StyleSheet.create({
   vehText: { color: theme.text, fontWeight: "600" },
   vehRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   tag: { fontSize: 11, fontWeight: "800", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, overflow: "hidden" },
-  tagOk: { color: "#04120E", backgroundColor: theme.accent },
+  tagOk: { color: theme.onAccent, backgroundColor: theme.accent },
   tagWait: { color: theme.amber, borderWidth: 1, borderColor: theme.amber },
   activate: { color: theme.accent, fontWeight: "700" },
   activeTag: { color: theme.accent, fontWeight: "800", fontSize: 11 },
@@ -238,11 +242,11 @@ const s = StyleSheet.create({
   offerFare: { color: theme.text, fontSize: 24, fontWeight: "800" },
   offerBtns: { flexDirection: "row", gap: 10, marginTop: 12 },
   accept: { flex: 1, backgroundColor: theme.accent, borderRadius: 10, padding: 13, alignItems: "center" },
-  acceptText: { color: "#04120E", fontWeight: "800" },
+  acceptText: { color: theme.onAccent, fontWeight: "800" },
   rejectBtn: { paddingHorizontal: 18, borderRadius: 10, padding: 13, alignItems: "center", borderWidth: 1, borderColor: theme.border },
   rejectText: { color: theme.muted, fontWeight: "700" },
   primary: { backgroundColor: theme.accent, borderRadius: 12, padding: 16, alignItems: "center", marginTop: 14 },
-  primaryText: { color: "#04120E", fontWeight: "800", fontSize: 16 },
+  primaryText: { color: theme.onAccent, fontWeight: "800", fontSize: 16 },
   otpInput: { backgroundColor: theme.surfaceAlt, borderRadius: 12, padding: 14, color: theme.text, fontSize: 22, letterSpacing: 8, textAlign: "center", borderWidth: 1, borderColor: theme.border, marginTop: 14 },
   earnBig: { color: theme.accent, fontSize: 30, fontWeight: "900" },
   logout: { color: theme.muted, textAlign: "center" },

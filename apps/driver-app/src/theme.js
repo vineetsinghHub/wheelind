@@ -1,13 +1,14 @@
-// Driver app shares Wheelind's Kinetic theme with a warm "on-shift" amber accent.
+// Wheelind brand — premium black + gold. Driver app. "Your ride, our pride."
 export const theme = {
-  bg: "#0B0F0E",
-  surface: "#141B19",
-  surfaceAlt: "#1C2622",
-  border: "#26332E",
-  text: "#F2F5F3",
-  muted: "#8A9793",
-  accent: "#00E0A4",
-  amber: "#FFC24B",
+  bg: "#0A0A0A",
+  surface: "#151412",
+  surfaceAlt: "#1E1B16",
+  border: "#2A2620",
+  text: "#F6F3EC",
+  muted: "#9A948A",
+  accent: "#F2B01E", // Wheelind gold
+  amber: "#FFCB4D", // lighter gold for pending/warn states
   danger: "#FF5A5F",
+  onAccent: "#0B0B0B",
   radius: 16,
 };
